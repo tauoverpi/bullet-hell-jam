@@ -3,15 +3,15 @@ const lib = @import("../lib.zig");
 const math = std.math;
 
 const Model = lib.Model;
-const Game = lib.Game;
+const Data = lib.Data;
 const Component = lib.ecs.Component;
 const Allocator = std.mem.Allocator;
 
 pub const phase = 0;
-pub const dependencies: []const Model.Signature.Tag = &.{
+pub const signature = Model.Signature.init(&.{
     .velocity,
     .keyboard,
-};
+});
 
 keys: Keys = .{},
 
@@ -20,6 +20,7 @@ pub const Keys = struct {
     left: u8 = 0,
     right: u8 = 0,
     down: u8 = 0,
+    space: u8 = 0,
 
     pub fn set(self: *Keys, comptime tag: std.meta.FieldEnum(Keys), state: bool) void {
         @field(self, @tagName(tag)) <<= 1;
@@ -29,9 +30,8 @@ pub const Keys = struct {
 
 pub fn update(
     self: *const @This(),
+    velocity: *Component(Data.Velocity),
     context: Model.Context,
-    velocity: *Component(Game.Velocity),
-    _: *const Component(Game.Keyboard),
 ) !void {
     _ = context;
 
