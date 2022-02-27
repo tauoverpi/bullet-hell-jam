@@ -23,15 +23,17 @@ pub fn main() anyerror!void {
     var systems: Systems = .{};
 
     const player = try game.new(gpa);
-    try game.update(gpa, player, .colour, .{ .colour = ray.BLACK });
-    try game.update(gpa, player, .keyboard, {});
-    try game.update(gpa, player, .render, {});
-    try game.update(gpa, player, .velocity, .{ .x = 0, .y = 0 });
-    try game.update(gpa, player, .object, .{
-        .x = width / 2,
-        .y = height - 30,
-        .width = 20,
-        .height = 20,
+    try game.update(gpa, player, .{
+        .colour = .{ .colour = ray.BLACK },
+        .keyboard = {},
+        .render = {},
+        .velocity = .{ .x = 0, .y = 0 },
+        .object = .{
+            .x = width / 2,
+            .y = height - 30,
+            .width = 20,
+            .height = 20,
+        },
     });
 
     // -- main loop --

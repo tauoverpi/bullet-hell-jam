@@ -16,21 +16,6 @@ pub const Set = struct {
 
     pub const DummyArrayList = struct {
         len: usize = 0,
-
-        pub fn appendAssumeCapacity(self: *@This(), _: anytype) void {
-            _ = self;
-        }
-
-        pub fn set(self: *@This(), index: usize, value: void) void {
-            _ = self;
-            _ = index;
-            _ = value;
-        }
-
-        pub fn get(self: *@This(), index: usize) void {
-            _ = self;
-            _ = index;
-        }
     };
 
     const Self = @This();
@@ -125,6 +110,7 @@ pub fn Component(comptime T: type) type {
                 fn _resize(this: *Erased.Interface, gpa: Allocator, new_size: usize) Allocator.Error!void {
                     const self = @ptrCast(*Self, @alignCast(@alignOf(*Self), this));
                     try self.data.ensureTotalCapacity(gpa, new_size);
+                    self.data.len += 1;
                 }
 
                 fn _shrink(this: *Erased.Interface, new_size: usize) void {
@@ -268,7 +254,7 @@ pub fn Model(comptime T: type) type {
     return struct {
         manager: EntityManager = .{},
         entities: std.AutoHashMapUnmanaged(Entity, Pointer) = .{},
-        archetypes: std.AutoHashMapUnmanaged(Signature, Archetype) = .{},
+        archetypes: std.AutoArrayHashMapUnmanaged(Signature, Archetype) = .{},
         command_queue: CommandQueue = .{},
 
         pub const CommandQueue = std.ArrayListUnmanaged(Command);
@@ -448,15 +434,16 @@ pub fn Model(comptime T: type) type {
             self: *Self,
             gpa: Allocator,
             key: Entity,
-            comptime tag: Signature.Tag,
-            value: meta.fieldInfo(T, tag).field_type,
+            values: anytype,
         ) !void {
-            const D = @TypeOf(value);
+            const Data = @TypeOf(values);
+            const fields = meta.fields(Data);
             const entity = self.entities.getPtr(key) orelse return error.NotFound; // 404
-            const new_signature = entity.signature.with(tag);
+
+            var new_signature = entity.signature;
+            inline for (fields) |field| new_signature.set(@field(Signature.Tag, field.name));
 
             if (entity.signature != new_signature) {
-                log.debug("adding {} component .{s} index {d}", .{ key, @tagName(tag), entity.index });
                 const archetype = self.archetypes.getPtr(new_signature) orelse
                     try self.createArchetype(gpa, new_signature);
                 const new_index = archetype.len;
@@ -478,17 +465,29 @@ pub fn Model(comptime T: type) type {
 
                 entity.index = new_index;
                 entity.signature = new_signature;
-                log.debug("{d} moved to {} index {}", .{ key, entity.signature, entity.index });
 
-                const com = archetype.components[new_signature.indexOf(tag).?];
-                const component = com.cast(D);
-                component.data.appendAssumeCapacity(value);
+                inline for (fields) |field| if (field.field_type != void) {
+                    const tag = @field(Signature.Tag, field.name);
+                    log.debug("{} adding new component .{}", .{ key, tag });
+                    const D = meta.fieldInfo(T, tag).field_type;
+                    const com = archetype.components[new_signature.indexOf(tag).?];
+                    const component = com.cast(D);
+                    const value = @field(values, field.name);
+
+                    component.data.set(new_index, value);
+                };
             } else {
-                log.debug("updating {} in {} component .{s} index {d}", .{ key, entity.signature, @tagName(tag), entity.index });
-                const archetype = self.archetypes.getPtr(entity.signature).?; // 404
-                const com = archetype.components[entity.signature.indexOf(tag).?];
+                log.debug("{} updating components", .{key});
+                inline for (fields) |field| if (field.field_type != void) {
+                    const tag = @field(Signature.Tag, field.name);
+                    const D = meta.fieldInfo(T, tag).field_type;
+                    const archetype = self.archetypes.getPtr(entity.signature).?; // 404
+                    const com = archetype.components[entity.signature.indexOf(tag).?];
+                    const component = com.cast(D);
+                    const value = @field(values, field.name);
 
-                com.cast(D).data.set(entity.index, value);
+                    component.data.set(entity.index, value);
+                };
             }
         }
 
@@ -543,16 +542,16 @@ pub fn Model(comptime T: type) type {
             });
 
             if (signature != .empty) {
-                inline for (meta.fields(T)) |field, i| {
+                inline for (meta.fields(T)) |field, i| if (field.field_type != void) {
                     const tag = @intToEnum(Signature.Tag, i);
                     if (signature.has(tag) and old_signature.has(tag)) {
                         const old_component = old_archetype.components[old_signature.indexOf(tag).?];
                         const value = old_component.cast(field.field_type).data.get(index);
-                        const component = archetype.components[signature.indexOf(tag).?];
-
-                        component.cast(field.field_type).data.appendAssumeCapacity(value);
+                        const com = archetype.components[signature.indexOf(tag).?];
+                        const component = com.cast(field.field_type);
+                        component.data.set(component.data.len - 1, value);
                     }
-                }
+                };
             }
 
             const key = old_archetype.entities.items[index];
@@ -577,7 +576,7 @@ pub fn Model(comptime T: type) type {
         fn createArchetype(self: *Self, gpa: Allocator, signature: Signature) Allocator.Error!*Archetype {
             log.debug("creating new archetype {}", .{signature});
             const entry = try self.archetypes.getOrPut(gpa, signature);
-            errdefer _ = self.archetypes.remove(signature);
+            errdefer _ = self.archetypes.swapRemove(signature);
 
             assert(!entry.found_existing);
 
@@ -601,64 +600,4 @@ pub fn Model(comptime T: type) type {
             return archetype;
         }
     };
-}
-
-test {
-    const Position = struct { x: u32, y: u32 };
-    const Velocity = struct { x: u32, y: u32 };
-
-    const DB = Model(struct {
-        position: Position,
-        velocity: Velocity,
-        hp: struct { hp: u32 },
-        mp: struct { mp: u32 },
-    });
-
-    const gpa = testing.allocator;
-
-    var db: DB = .{};
-    defer db.deinit(gpa);
-
-    const car = try db.new(gpa);
-    defer db.delete(car);
-
-    {
-        try db.update(gpa, car, .position, .{ .x = 5, .y = 5 });
-
-        const ptr = db.entities.get(car).?;
-        const archetype = db.archetypes.getPtr(ptr.signature).?;
-        const position = archetype.components[ptr.signature.indexOf(.position).?].cast(Position);
-
-        try testing.expectEqual(@as(u32, 5), position.data.items(.x)[ptr.index]);
-    }
-
-    {
-        try db.update(gpa, car, .velocity, .{ .x = 1, .y = 1 });
-
-        const ptr = db.entities.get(car).?;
-        const archetype = db.archetypes.getPtr(ptr.signature).?;
-        const position = archetype.components[ptr.signature.indexOf(.position).?].cast(Position);
-        const velocity = archetype.components[ptr.signature.indexOf(.velocity).?].cast(Velocity);
-
-        try testing.expectEqual(@as(u32, 5), position.data.items(.x)[ptr.index]);
-        try testing.expectEqual(@as(u32, 1), velocity.data.items(.x)[ptr.index]);
-    }
-    {
-        try db.update(gpa, car, .velocity, .{ .x = 1, .y = 1 });
-
-        const ptr = db.entities.get(car).?;
-        const archetype = db.archetypes.getPtr(ptr.signature).?;
-        const velocity = archetype.components[ptr.signature.indexOf(.velocity).?].cast(Velocity);
-
-        try testing.expectEqual(@as(u32, 1), velocity.data.items(.x)[ptr.index]);
-    }
-
-    var objects: u32 = 0;
-
-    var it = db.archetypes.valueIterator();
-    while (it.next()) |archetype| {
-        objects += archetype.len;
-    }
-
-    try testing.expectEqual(@as(u32, 1), objects);
 }
