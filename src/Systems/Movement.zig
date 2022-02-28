@@ -6,11 +6,8 @@ const Data = lib.Data;
 const Component = lib.ecs.Component;
 const Allocator = std.mem.Allocator;
 
-pub const phase = 1;
-pub const signature = Model.Signature.init(&.{
-    .object,
-    .velocity,
-});
+pub const inputs: []const Model.Signature.Tag = &.{ .object, .velocity };
+pub const signature = Model.Signature.init(inputs);
 
 pub fn update(
     self: *const @This(),

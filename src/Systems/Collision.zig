@@ -11,10 +11,8 @@ const Allocator = std.mem.Allocator;
 const Entity = lib.ecs.Entity;
 
 pub const phase = 50;
-pub const signature = Model.Signature.init(&.{
-    .object,
-    .collision,
-});
+pub const inputs: []const Model.Signature.Tag = &.{ .object, .collision };
+pub const signature = Model.Signature.init(inputs);
 
 cache: Cache = .{},
 

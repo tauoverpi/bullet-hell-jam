@@ -164,7 +164,9 @@ pub const Erased = struct {
     }
 
     pub fn cast(self: Erased, comptime T: type) *Component(T) {
-        if (is_debug) assert(Component(T).hash == self.hash);
+        if (is_debug and Component(T).hash != self.hash) {
+            std.debug.panic("unexpected hash for {}", .{Component(T)});
+        }
         return @ptrCast(*Component(T), @alignCast(@alignOf(*Component(T)), self.base));
     }
 };
@@ -598,6 +600,94 @@ pub fn Model(comptime T: type) type {
             }
 
             return archetype;
+        }
+
+        pub fn step(
+            self: *Self,
+            gpa: Allocator,
+            systems: anytype,
+        ) !void {
+            const info = @typeInfo(meta.Child(@TypeOf(systems))).Struct;
+
+            var frame_allocator = std.heap.ArenaAllocator.init(gpa);
+            defer frame_allocator.deinit();
+
+            const arena = frame_allocator.allocator();
+
+            inline for (info.fields) |field| {
+                var managed = self.command_queue.toManaged(gpa);
+                defer self.command_queue = managed.moveToUnmanaged();
+
+                const function = field.field_type.update;
+                const system = &@field(systems, field.name);
+                const System = meta.Child(@TypeOf(system));
+
+                const Tuple = meta.ArgsTuple(@TypeOf(function));
+                const shape = Signature.init(field.field_type.inputs);
+                const inputs = field.field_type.inputs;
+                const arguments = meta.fields(Tuple);
+
+                if (@hasDecl(System, "begin")) {
+                    try system.begin(.{
+                        .gpa = gpa,
+                        .arena = arena,
+                    });
+                }
+
+                for (self.archetypes.keys()) |signature, index| {
+                    if (signature.contains(shape)) {
+                        const archetype = self.archetypes.values()[index];
+                        if (archetype.len == 0) continue;
+
+                        const components = archetype.components;
+
+                        const context: Context = .{
+                            .gpa = gpa,
+                            .arena = arena,
+                            .command_queue = &managed,
+                            .entities = archetype.entities.items,
+                            .signature = signature,
+                        };
+
+                        var tuple: Tuple = undefined;
+                        tuple.@"0" = system;
+
+                        comptime var parameter: comptime_int = 1;
+                        inline for (inputs) |tag| {
+                            const Type = meta.fieldInfo(T, tag).field_type;
+                            if (Type != void) {
+                                const com = signature.indexOf(tag).?;
+                                const component = components[com].cast(Type);
+                                tuple[parameter] = component;
+                                parameter += 1;
+                            }
+                        }
+
+                        @field(tuple, arguments[arguments.len - 1].name) = context;
+                        const options = .{};
+                        try @call(options, function, tuple);
+                    }
+                }
+
+                if (@hasDecl(System, "end")) {
+                    try system.end(.{
+                        .gpa = gpa,
+                        .arena = arena,
+                    });
+                }
+
+                try self.runCommands(gpa);
+            }
+        }
+
+        fn runCommands(self: *Self, gpa: Allocator) !void {
+            for (self.command_queue.items) |com| {
+                switch (com.command) {
+                    .add => std.debug.todo("handle the value init somehow"),
+                    .remove => try self.remove(gpa, com.key, com.tag),
+                    .delete => self.delete(com.key),
+                }
+            }
         }
     };
 }

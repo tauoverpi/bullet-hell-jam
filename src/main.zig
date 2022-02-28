@@ -26,6 +26,7 @@ pub fn main() anyerror!void {
     try game.update(gpa, player, .{
         .colour = .{ .colour = ray.BLACK },
         .keyboard = {},
+        .health = {},
         .render = {},
         .velocity = .{ .x = 0, .y = 0 },
         .object = .{
@@ -36,9 +37,29 @@ pub fn main() anyerror!void {
         },
     });
 
+    const enemy = try game.new(gpa);
+    try game.update(gpa, enemy, .{
+        .colour = .{ .colour = ray.RED },
+        .render = {},
+        .velocity = .{ .x = 0, .y = 0 },
+        .health = .{ .hull = 10 },
+        .object = .{
+            .x = width / 2,
+            .y = 20,
+            .width = 20,
+            .height = 20,
+        },
+    });
+
     // -- main loop --
 
     ray.SetTargetFPS(60);
+
+    var clock = try std.time.Timer.start();
+    var delta: f64 = @intToFloat(f64, std.time.ns_per_s / 60);
+    var time: f64 = 0;
+    var current_time: f64 = 0;
+    var accumulator: f64 = 0;
 
     while (!ray.WindowShouldClose()) {
         // -- event updates --
@@ -52,95 +73,24 @@ pub fn main() anyerror!void {
 
         // -- simulation step --
 
-        var frame_allocator = std.heap.ArenaAllocator.init(gpa);
-        defer frame_allocator.deinit();
+        const new_time = @intToFloat(f64, clock.read());
+        const frame_time = new_time - current_time;
+        current_time = new_time;
 
-        const arena = frame_allocator.allocator();
+        accumulator += frame_time;
 
-        {
-            const shape = Systems.Collision.signature;
+        while (accumulator >= 0) {
+            accumulator -= delta;
+            time += delta;
 
-            var it = game.archetypes.iterator();
-            while (it.next()) |entry| {
-                const archetype = entry.value_ptr;
-                const signature = entry.key_ptr.*;
-
-                if (archetype.len != 0 and signature.contains(shape)) {
-                    var managed = game.command_queue.toManaged(gpa);
-                    defer game.command_queue = managed.moveToUnmanaged();
-
-                    const components = entry.value_ptr.components;
-                    const objects = components[signature.indexOf(.object).?].cast(Data.Object);
-
-                    try systems.collision.update(objects, .{
-                        .gpa = gpa,
-                        .arena = arena,
-                        .command_queue = &managed,
-                        .entities = entry.value_ptr.entities.items,
-                        .signature = entry.key_ptr.*,
-                    });
-                }
-            }
-        }
-
-        {
-            const shape = Systems.KeyboardInput.signature;
-
-            var it = game.archetypes.iterator();
-            while (it.next()) |entry| {
-                const archetype = entry.value_ptr;
-                const signature = entry.key_ptr.*;
-
-                if (archetype.len != 0 and signature.contains(shape)) {
-                    var managed = game.command_queue.toManaged(gpa);
-                    defer game.command_queue = managed.moveToUnmanaged();
-
-                    const components = entry.value_ptr.components;
-                    const velocity = components[signature.indexOf(.velocity).?].cast(Data.Velocity);
-
-                    try systems.keyboard_input.update(velocity, .{
-                        .gpa = gpa,
-                        .arena = arena,
-                        .command_queue = &managed,
-                        .entities = entry.value_ptr.entities.items,
-                        .signature = entry.key_ptr.*,
-                    });
-                }
-            }
-        }
-
-        {
-            const shape = Systems.Movement.signature;
-
-            var it = game.archetypes.iterator();
-            while (it.next()) |entry| {
-                const archetype = entry.value_ptr;
-                const signature = entry.key_ptr.*;
-
-                if (archetype.len != 0 and signature.contains(shape)) {
-                    var managed = game.command_queue.toManaged(gpa);
-                    defer game.command_queue = managed.moveToUnmanaged();
-
-                    const components = entry.value_ptr.components;
-                    const object = components[signature.indexOf(.object).?].cast(Data.Object);
-                    const velocity = components[signature.indexOf(.velocity).?].cast(Data.Velocity);
-
-                    try systems.movement.update(object, velocity, .{
-                        .gpa = gpa,
-                        .arena = arena,
-                        .command_queue = &managed,
-                        .entities = entry.value_ptr.entities.items,
-                        .signature = entry.key_ptr.*,
-                    });
-                }
-            }
+            try game.step(gpa, &systems);
         }
 
         ray.BeginDrawing();
         ray.ClearBackground(ray.RAYWHITE);
         ray.DrawFPS(0, 0);
 
-        {
+        { // TODO: figure out if this should really be a system or not as it looks like one
             const shape = Model.Signature.init(&.{ .object, .colour, .render });
 
             var it = game.archetypes.iterator();
@@ -165,13 +115,5 @@ pub fn main() anyerror!void {
         }
 
         ray.EndDrawing();
-
-        for (game.command_queue.items) |com| {
-            switch (com.command) {
-                .add => std.debug.todo("handle the value init somehow"),
-                .remove => try game.remove(gpa, com.key, com.tag),
-                .delete => game.delete(com.key),
-            }
-        }
     }
 }

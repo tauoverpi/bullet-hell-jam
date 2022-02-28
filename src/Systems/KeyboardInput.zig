@@ -8,10 +8,8 @@ const Component = lib.ecs.Component;
 const Allocator = std.mem.Allocator;
 
 pub const phase = 0;
-pub const signature = Model.Signature.init(&.{
-    .velocity,
-    .keyboard,
-});
+pub const inputs: []const Model.Signature.Tag = &.{ .velocity, .keyboard };
+pub const signature = Model.Signature.init(inputs);
 
 keys: Keys = .{},
 
