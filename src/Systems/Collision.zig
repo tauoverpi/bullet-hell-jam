@@ -76,9 +76,10 @@ pub fn update(
 ) !void {
     var index: u32 = 0;
     while (index < object.data.len) : (index += 1) {
-        try self.cache.append(undefined, undefined, undefined);
-        _ = context.arena;
-        _ = object.data.get(index);
-        _ = context.entities[index];
+        try self.cache.append(
+            context.arena,
+            object.data.get(index),
+            context.entities[index],
+        );
     }
 }

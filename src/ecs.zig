@@ -221,7 +221,7 @@ pub const Archetype = struct {
 pub const Entity = enum(u32) { _ };
 
 pub const EntityManager = struct {
-    count: u32 = 0,
+    alive: u32 = 0,
     dead: std.ArrayListUnmanaged(Entity) = .{},
 
     const log = std.log.scoped(.EntityManager);
@@ -231,14 +231,13 @@ pub const EntityManager = struct {
             return key;
         }
 
-        try self.dead.ensureTotalCapacity(gpa, self.dead.items.len + 1);
+        try self.dead.ensureTotalCapacity(gpa, self.alive + 1);
 
-        if (@addWithOverflow(u32, self.count, 1, &self.count)) {
-            self.count = math.maxInt(u32);
+        if (self.alive == math.maxInt(u32)) {
             return error.OutOfMemory;
         } else {
-            const key = @intToEnum(Entity, self.count - 1);
-            return key;
+            defer self.alive += 1;
+            return @intToEnum(Entity, self.alive);
         }
     }
 
@@ -260,7 +259,6 @@ pub fn Model(comptime T: type) type {
         command_queue: CommandQueue = .{},
 
         pub const CommandQueue = std.ArrayListUnmanaged(Command);
-        pub const CommandQueueManaged = std.ArrayList(Command);
 
         const log = std.log.scoped(.Model);
 
@@ -277,18 +275,17 @@ pub fn Model(comptime T: type) type {
             /// Signature of the archetype
             signature: Signature,
 
-            /// Queue of commands to be run after the system updates
-            command_queue: *CommandQueueManaged,
+            /// Database
+            model: *Self,
         };
 
         pub const Command = struct {
             command: Tag,
+            signature: Signature,
             key: Entity,
-            tag: Signature.Tag,
 
             pub const Tag = enum(u8) {
                 remove,
-                add,
                 delete,
             };
         };
@@ -335,6 +332,10 @@ pub fn Model(comptime T: type) type {
                 var copy = self;
                 copy.unset(tag);
                 return copy;
+            }
+
+            pub fn disjoint(self: Signature, other: Signature) Signature {
+                return @intToEnum(Signature, @enumToInt(self) & ~@enumToInt(other));
             }
 
             pub fn has(self: Signature, tag: Tag) bool {
@@ -497,10 +498,10 @@ pub fn Model(comptime T: type) type {
             self: *Self,
             gpa: Allocator,
             key: Entity,
-            tag: Signature.Tag,
+            tags: Signature,
         ) !void {
             const entity = self.entities.getPtr(key) orelse return error.NotFound; // 404
-            const new_signature = entity.signature.without(tag);
+            const new_signature = entity.signature.disjoint(tags);
 
             if (new_signature != entity.signature) {
                 const old_archetype = self.archetypes.getPtr(entity.signature).?; // 404
@@ -511,7 +512,7 @@ pub fn Model(comptime T: type) type {
                 const new_index = archetype.len;
                 try archetype.reserve(gpa, key);
 
-                log.debug("removing {} component .{s}", .{ key, @tagName(tag) });
+                log.debug("removing {} sub archetype {}", .{ key, tags });
 
                 self.migrateArchetype(
                     entity.index,
@@ -614,10 +615,9 @@ pub fn Model(comptime T: type) type {
 
             const arena = frame_allocator.allocator();
 
-            inline for (info.fields) |field| {
-                var managed = self.command_queue.toManaged(gpa);
-                defer self.command_queue = managed.moveToUnmanaged();
+            var ret: anyerror!void = {};
 
+            inline for (info.fields) |field| {
                 const function = field.field_type.update;
                 const system = &@field(systems, field.name);
                 const System = meta.Child(@TypeOf(system));
@@ -644,7 +644,7 @@ pub fn Model(comptime T: type) type {
                         const context: Context = .{
                             .gpa = gpa,
                             .arena = arena,
-                            .command_queue = &managed,
+                            .model = self,
                             .entities = archetype.entities.items,
                             .signature = signature,
                         };
@@ -664,9 +664,11 @@ pub fn Model(comptime T: type) type {
                         }
 
                         @field(tuple, arguments[arguments.len - 1].name) = context;
-                        const options = .{};
-                        try @call(options, function, tuple);
+                        const options = .{ .modifier = .never_inline };
+                        ret = @call(options, function, tuple);
                     }
+
+                    try ret;
                 }
 
                 if (@hasDecl(System, "end")) {
@@ -677,14 +679,14 @@ pub fn Model(comptime T: type) type {
                 }
 
                 try self.runCommands(gpa);
+                self.command_queue.clearRetainingCapacity();
             }
         }
 
         fn runCommands(self: *Self, gpa: Allocator) !void {
             for (self.command_queue.items) |com| {
                 switch (com.command) {
-                    .add => std.debug.todo("handle the value init somehow"),
-                    .remove => try self.remove(gpa, com.key, com.tag),
+                    .remove => try self.remove(gpa, com.key, com.signature),
                     .delete => self.delete(com.key),
                 }
             }

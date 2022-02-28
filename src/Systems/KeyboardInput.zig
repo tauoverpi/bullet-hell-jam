@@ -7,11 +7,12 @@ const Data = lib.Data;
 const Component = lib.ecs.Component;
 const Allocator = std.mem.Allocator;
 
-pub const phase = 0;
-pub const inputs: []const Model.Signature.Tag = &.{ .velocity, .keyboard };
+pub const inputs: []const Model.Signature.Tag = &.{ .velocity, .keyboard, .cooldown, .object };
 pub const signature = Model.Signature.init(inputs);
 
 keys: Keys = .{},
+time: u64 = 0,
+rate: u64 = 8,
 
 pub const Keys = struct {
     up: u8 = 0,
@@ -29,6 +30,8 @@ pub const Keys = struct {
 pub fn update(
     self: *const @This(),
     velocity: *Component(Data.Velocity),
+    cooldown: *Component(Data.Cooldown),
+    position: *const Component(Data.Object),
     context: Model.Context,
 ) !void {
     _ = context;
@@ -59,5 +62,28 @@ pub fn update(
 
         velocity.data.items(.x)[index] = x;
         velocity.data.items(.y)[index] = y;
+
+        const shooting = self.keys.space & 1 == 1 and
+            cooldown.data.items(.delay)[index] -| self.time == 0;
+
+        if (shooting) {
+            cooldown.data.items(.delay)[index] = self.time + @divTrunc(std.time.ns_per_s, self.rate);
+            const bullet = try context.model.new(context.gpa);
+            const object = .{
+                .x = position.data.items(.x)[index],
+                .y = position.data.items(.y)[index],
+                .width = 5,
+                .height = 5,
+            };
+
+            try context.model.update(context.gpa, bullet, .{
+                .velocity = .{ .x = 0, .y = -5 },
+                .colour = .{ .colour = lib.ray.BLUE },
+                .render = {},
+                .friendly = {},
+                .bullet = {},
+                .object = object,
+            });
+        }
     }
 }

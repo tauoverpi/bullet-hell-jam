@@ -4,15 +4,19 @@ const ray = lib.ray;
 object: Object,
 velocity: Velocity,
 colour: Colour,
-keyboard: Keyboard,
-collision: Collision,
-render: Render,
+keyboard: void,
+collision: void,
+render: void,
 health: Health,
 damage: Damage,
+cooldown: Cooldown,
+friendly: void,
+hostile: void,
+bullet: void,
 
-pub const Collision = void;
-pub const Keyboard = void;
-pub const Render = void;
+pub const Cooldown = struct {
+    delay: u64 = 0,
+};
 
 pub const Health = struct {
     hull: u32 = 100,

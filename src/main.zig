@@ -29,6 +29,7 @@ pub fn main() anyerror!void {
         .health = {},
         .render = {},
         .velocity = .{ .x = 0, .y = 0 },
+        .cooldown = .{},
         .object = .{
             .x = width / 2,
             .y = height - 30,
@@ -43,6 +44,7 @@ pub fn main() anyerror!void {
         .render = {},
         .velocity = .{ .x = 0, .y = 0 },
         .health = .{ .hull = 10 },
+        .cooldown = .{},
         .object = .{
             .x = width / 2,
             .y = 20,
@@ -55,25 +57,28 @@ pub fn main() anyerror!void {
 
     ray.SetTargetFPS(60);
 
-    var clock = try std.time.Timer.start();
     var delta: f64 = @intToFloat(f64, std.time.ns_per_s / 60);
     var time: f64 = 0;
     var current_time: f64 = 0;
     var accumulator: f64 = 0;
+    var clock = try std.time.Timer.start();
 
     while (!ray.WindowShouldClose()) {
         // -- event updates --
 
-        const keyboard = &systems.keyboard_input.keys;
+        const tick = clock.read();
 
+        const keyboard = &systems.keyboard_input.keys;
+        systems.keyboard_input.time = tick;
         keyboard.set(.up, ray.IsKeyDown(ray.KEY_UP));
         keyboard.set(.down, ray.IsKeyDown(ray.KEY_DOWN));
         keyboard.set(.left, ray.IsKeyDown(ray.KEY_LEFT));
         keyboard.set(.right, ray.IsKeyDown(ray.KEY_RIGHT));
+        keyboard.set(.space, ray.IsKeyDown(ray.KEY_SPACE));
 
         // -- simulation step --
 
-        const new_time = @intToFloat(f64, clock.read());
+        const new_time = @intToFloat(f64, tick);
         const frame_time = new_time - current_time;
         current_time = new_time;
 
