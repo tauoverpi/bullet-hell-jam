@@ -80,7 +80,7 @@ pub fn update(
                 .velocity = .{ .x = 0, .y = -5 },
                 .colour = .{ .colour = lib.ray.BLUE },
                 .render = {},
-                .friendly = {},
+                .collision = {},
                 .bullet = {},
                 .object = object,
             });

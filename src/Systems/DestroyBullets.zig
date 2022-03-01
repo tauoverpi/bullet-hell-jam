@@ -22,8 +22,8 @@ pub fn update(
     while (index < position.data.len) : (index += 1) {
         const obj = position.data.get(index);
         const out_of_bounds = //
-            obj.y < -obj.height or
-            obj.x < -obj.width or
+            obj.y < 0 or
+            obj.x < 0 or
             obj.y > obj.height + @intToFloat(f32, root.height) or
             obj.x > obj.width + @intToFloat(f32, root.width);
 

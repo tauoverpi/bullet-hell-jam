@@ -45,6 +45,7 @@ pub fn main() anyerror!void {
         .velocity = .{ .x = 0, .y = 0 },
         .health = .{ .hull = 10 },
         .cooldown = .{},
+        .collision = {},
         .object = .{
             .x = width / 2,
             .y = 20,

@@ -10,7 +10,6 @@ render: void,
 health: Health,
 damage: Damage,
 cooldown: Cooldown,
-friendly: void,
 hostile: void,
 bullet: void,
 

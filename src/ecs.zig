@@ -256,11 +256,53 @@ pub fn Model(comptime T: type) type {
         manager: EntityManager = .{},
         entities: std.AutoHashMapUnmanaged(Entity, Pointer) = .{},
         archetypes: std.AutoArrayHashMapUnmanaged(Signature, Archetype) = .{},
-        command_queue: CommandQueue = .{},
+        commands: CommandMap = .{},
 
-        pub const CommandQueue = std.ArrayListUnmanaged(Command);
+        pub const CommandMap = std.AutoHashMapUnmanaged(Entity, Command);
+
+        pub const Command = struct {
+            command: Tag,
+            signature: Signature,
+
+            pub const Tag = enum(u8) {
+                remove,
+                delete,
+            };
+        };
 
         const log = std.log.scoped(.Model);
+
+        pub fn ContextMixin(comptime C: type) type {
+            return struct {
+
+                /// Remove a set of components from the given entity after the system update completes
+                pub fn remove(self: C, key: Entity, signature: Signature) Allocator.Error!void {
+                    const entry = try self.model.commands.getOrPut(self.gpa, key);
+                    if (entry.found_existing) {
+                        assert(entry.value_ptr.command == .remove);
+                        entry.value_ptr.signature = entry.value_ptr.signature.with(signature);
+                    } else {
+                        entry.value_ptr.* = .{
+                            .command = .remove,
+                            .signature = signature,
+                        };
+                    }
+                }
+
+                /// Remove a set of components from the given entity after the system update completes
+                pub fn delete(self: C, key: Entity) Allocator.Error!void {
+                    const entry = try self.model.commands.getOrPut(self.gpa, key);
+                    if (entry.found_existing) {
+                        assert(entry.value_ptr.command == .delete);
+                    } else {
+                        entry.value_ptr.* = .{
+                            .command = .delete,
+                            .signature = .empty,
+                        };
+                    }
+                }
+            };
+        }
 
         pub const Context = struct {
             /// General purpose allocator
@@ -278,6 +320,19 @@ pub fn Model(comptime T: type) type {
             /// Database
             model: *Self,
 
+            pub const Begin = struct {
+                gpa: Allocator,
+                arena: Allocator,
+            };
+
+            pub const End = struct {
+                gpa: Allocator,
+                arena: Allocator,
+                model: *Self,
+
+                pub usingnamespace ContextMixin(End);
+            };
+
             pub fn spawn(self: Context, values: anytype) !Entity {
                 const key = try self.model.new(self.gpa);
                 errdefer self.model.delete(key);
@@ -287,34 +342,7 @@ pub fn Model(comptime T: type) type {
                 return key;
             }
 
-            /// Remove a set of components from the given entity after the system update completes
-            pub fn remove(self: Context, key: Entity, signature: Signature) Allocator.Error!void {
-                try self.model.command_queue.append(self.gpa, .{
-                    .command = .remove,
-                    .key = key,
-                    .signature = signature,
-                });
-            }
-
-            /// Delete the given entity after the system update completes
-            pub fn delete(self: Context, key: Entity) Allocator.Error!void {
-                try self.model.command_queue.append(self.gpa, .{
-                    .command = .delete,
-                    .key = key,
-                    .signature = .empty,
-                });
-            }
-        };
-
-        pub const Command = struct {
-            command: Tag,
-            signature: Signature,
-            key: Entity,
-
-            pub const Tag = enum(u8) {
-                remove,
-                delete,
-            };
+            pub usingnamespace ContextMixin(Context);
         };
 
         pub const Signature = enum(Int) {
@@ -702,19 +730,29 @@ pub fn Model(comptime T: type) type {
                     try system.end(.{
                         .gpa = gpa,
                         .arena = arena,
+                        .model = self,
                     });
                 }
 
                 try self.runCommands(gpa);
-                self.command_queue.clearRetainingCapacity();
+                self.commands.clearRetainingCapacity();
             }
         }
 
         fn runCommands(self: *Self, gpa: Allocator) !void {
-            for (self.command_queue.items) |com| {
+            if (self.commands.count() != 0)
+                log.debug("running command set", .{});
+
+            var it = self.commands.iterator();
+
+            while (it.next()) |entry| {
+                const key = entry.key_ptr.*;
+                const com = entry.value_ptr.*;
+                log.debug("command .{s}", .{@tagName(com.command)});
+
                 switch (com.command) {
-                    .remove => try self.remove(gpa, com.key, com.signature),
-                    .delete => self.delete(com.key),
+                    .remove => try self.remove(gpa, key, com.signature),
+                    .delete => self.delete(key),
                 }
             }
         }
