@@ -68,7 +68,7 @@ pub fn update(
 
         if (shooting) {
             cooldown.data.items(.delay)[index] = self.time + @divTrunc(std.time.ns_per_s, self.rate);
-            const bullet = try context.model.new(context.gpa);
+
             const object = .{
                 .x = position.data.items(.x)[index],
                 .y = position.data.items(.y)[index],
@@ -76,7 +76,7 @@ pub fn update(
                 .height = 5,
             };
 
-            try context.model.update(context.gpa, bullet, .{
+            _ = try context.spawn(.{
                 .velocity = .{ .x = 0, .y = -5 },
                 .colour = .{ .colour = lib.ray.BLUE },
                 .render = {},

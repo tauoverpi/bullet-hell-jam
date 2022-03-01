@@ -28,11 +28,7 @@ pub fn update(
             obj.x > obj.width + @intToFloat(f32, root.width);
 
         if (out_of_bounds) {
-            try context.model.command_queue.append(context.gpa, .{
-                .command = .delete,
-                .signature = .empty,
-                .key = context.entities[index],
-            });
+            try context.delete(context.entities[index]);
         }
     }
 }

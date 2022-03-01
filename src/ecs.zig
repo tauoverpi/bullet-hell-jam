@@ -277,6 +277,33 @@ pub fn Model(comptime T: type) type {
 
             /// Database
             model: *Self,
+
+            pub fn spawn(self: Context, values: anytype) !Entity {
+                const key = try self.model.new(self.gpa);
+                errdefer self.model.delete(key);
+
+                try self.model.update(self.gpa, key, values);
+
+                return key;
+            }
+
+            /// Remove a set of components from the given entity after the system update completes
+            pub fn remove(self: Context, key: Entity, signature: Signature) Allocator.Error!void {
+                try self.model.command_queue.append(self.gpa, .{
+                    .command = .remove,
+                    .key = key,
+                    .signature = signature,
+                });
+            }
+
+            /// Delete the given entity after the system update completes
+            pub fn delete(self: Context, key: Entity) Allocator.Error!void {
+                try self.model.command_queue.append(self.gpa, .{
+                    .command = .delete,
+                    .key = key,
+                    .signature = .empty,
+                });
+            }
         };
 
         pub const Command = struct {
